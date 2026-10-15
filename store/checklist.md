@@ -18,18 +18,20 @@
 
 - [x] В [LICENSE](../LICENSE) указан владелец: `Hydro-zz`.
 - [x] В [PRIVACY.md](../PRIVACY.md) и [CHANGELOG.md](../CHANGELOG.md) ссылки ведут на владельца `Hydro-zz`.
-- [ ] Создать публичный репозиторий `https://github.com/Hydro-zz/hh-cover-letter` и отправить код:
-      `git remote add origin https://github.com/Hydro-zz/hh-cover-letter.git`, затем `git push -u origin main`.
-      После этого `package.ps1` сам подставит `homepage_url` в релизный манифест из адреса remote.
+- [x] Репозиторий `https://github.com/Hydro-zz/hh-cover-letter` создан, код отправлен (`main`), тег `v1.0.0` опубликован.
+      `package.ps1` подставляет `homepage_url` из адреса remote автоматически.
 
 ## 2. Публичный URL политики конфиденциальности
 
-Кабинет разработчика требует ссылку, открывающуюся в браузере.
+Кабинет разработчика требует ссылку, открывающуюся в браузере. Репозиторий публичный, поэтому рабочая ссылка уже есть:
 
-- [ ] Включить GitHub Pages для репозитория (Settings → Pages → Deploy from branch → `main` / root) и получить адрес
-      вида `https://<владелец>.github.io/hh-cover-letter/PRIVACY.html` при рендере Markdown, либо
-- [ ] использовать прямую ссылку на файл: `https://github.com/Hydro-zz/hh-cover-letter/blob/main/PRIVACY.md`.
-- [ ] Проверить, что ссылка открывается в приватном окне без авторизации.
+```
+https://github.com/Hydro-zz/hh-cover-letter/blob/main/PRIVACY.md
+```
+
+- [ ] Открыть её в приватном окне и убедиться, что страница видна без авторизации.
+- [ ] По желанию: включить GitHub Pages (Settings → Pages → Deploy from branch → `main` / root) и получить адрес
+      вида `https://hydro-zz.github.io/hh-cover-letter/PRIVACY` — выглядит опрятнее, чем страница на github.com.
 
 ## 3. Скриншоты
 
@@ -81,7 +83,9 @@
 - [ ] Установить расширение из стора и пройти путь целиком: ключ → резюме → генерация → вставка в отклик.
 - [ ] Помнить, что идентификатор магазинной копии отличается от локального, поэтому настройки вводятся заново.
       Локальную распакованную копию можно оставить, но две копии сразу путают: лучше отключить одну.
-- [ ] Создать релиз на GitHub с тегом `v1.0.0` и текстом из changelog: `git tag v1.0.0; git push --tags`.
+- [x] Тег `v1.0.0` создан и отправлен в репозиторий.
+- [ ] Оформить релиз на странице тега (<https://github.com/Hydro-zz/hh-cover-letter/releases/new?tag=v1.0.0>),
+      вставив текст записи 1.0.0 из [CHANGELOG.md](../CHANGELOG.md).
 - [ ] Ссылку на витрину добавить в [README.md](../README.md).
 
 ## 9. Обновления
