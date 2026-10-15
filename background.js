@@ -220,6 +220,10 @@ function extractHhPage() {
   const PERSON_NAME = /^[А-ЯЁA-Z][а-яёa-z'’.-]+(?:\s+[А-ЯЁA-Z][а-яёa-z'’.-]+){1,2}$/;
   const RESUME_LINK = /\/resume\/([^/?#]+)/i;
 
+  // разметка карточки резюме на странице профиля: ссылка и её название
+  const RESUME_LINK_SELECTORS = ['a[data-qa="resume-card-link"]', 'a[href*="/resume/"]'];
+  const RESUME_TITLE_SELECTORS = ['[data-qa="cell-text-content"]', '[data-qa*="resume-title"]'];
+
   const candidates = [];
   const addText = (value) => {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -253,20 +257,66 @@ function extractHhPage() {
 
   const name = candidates.find((text) => PERSON_NAME.test(text)) || '';
 
-  const found = new Map();
-  for (const link of document.querySelectorAll('a[href*="/resume/"]')) {
-    const match = String(link.href || '').match(RESUME_LINK);
-    if (!match) continue;
+  // Ссылку на резюме берём из карточки, название — из её текстового узла.
+  // Общий поиск по /resume/ остаётся запасным вариантом, но служебные адреса
+  // вроде «создать резюме» (/resume/new) отсеиваются.
+  const SERVICE_RESUME_ID = /^(new|create|edit|search|list|my|all)$/i;
+  const MIN_RESUME_ID = 8;
 
-    const hash = match[1];
-    const url = `${link.origin}/resume/${hash}`;
-    const title = clean(link.innerText)
+  const titleFrom = (root) => {
+    for (const selector of RESUME_TITLE_SELECTORS) {
+      let node;
+      try {
+        node = root.querySelector(selector);
+      } catch {
+        continue;
+      }
+      const text = node ? clean(node.innerText) : '';
+      if (text) return text.split('\n')[0];
+    }
+    return '';
+  };
+
+  const titleOf = (link) => {
+    const own = titleFrom(link);
+    if (own) return own;
+
+    // название может лежать рядом со ссылкой, в той же карточке: поднимаемся вверх,
+    // но не заходим в контейнер со списком резюме, чтобы не взять чужой заголовок
+    let scope = link.parentElement;
+    while (scope && scope !== document.body) {
+      if (scope.querySelectorAll('a[href*="/resume/"]').length > 1) break;
+      const near = titleFrom(scope);
+      if (near) return near;
+      scope = scope.parentElement;
+    }
+
+    return clean(link.innerText)
       .split('\n')
       .find((line) => line.length > 2) || '';
+  };
 
-    const existing = found.get(hash);
-    if (!existing) found.set(hash, { url, title });
+  const found = new Map();
+
+  const collect = (link, trusted) => {
+    const match = String(link.href || '').match(RESUME_LINK);
+    if (!match) return;
+
+    const id = match[1];
+    if (!trusted && (SERVICE_RESUME_ID.test(id) || id.length < MIN_RESUME_ID)) return;
+
+    const existing = found.get(id);
+    const title = titleOf(link);
+
+    if (!existing) found.set(id, { url: `${link.origin}/resume/${id}`, title });
     else if (!existing.title && title) existing.title = title;
+  };
+
+  const cardLinks = [...document.querySelectorAll(RESUME_LINK_SELECTORS[0])];
+  if (cardLinks.length) {
+    for (const link of cardLinks) collect(link, true);
+  } else {
+    for (const link of document.querySelectorAll(RESUME_LINK_SELECTORS[1])) collect(link, false);
   }
 
   const container = document.querySelector('[data-qa="resume"]') || document.querySelector('main') || document.body;

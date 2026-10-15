@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-10-15
+
+### Исправлено
+- В список резюме на странице профиля попадали служебные ссылки (например, «Создать резюме» — `/resume/new`):
+  теперь адрес берётся из карточки резюме (`a[data-qa="resume-card-link"]`), а название — из её текстового узла
+  (`[data-qa="cell-text-content"]`). Общий поиск по ссылкам `/resume/…` остался запасным вариантом и отсеивает
+  короткие и служебные идентификаторы.
+- Название резюме больше не может подтянуться от соседней карточки: поиск ограничен карточкой, а из общего
+  контейнера со списком заголовки не берутся.
+
 ## [1.1.0] — 2026-10-15
 
 ### Добавлено
@@ -91,7 +101,8 @@
 - Горячая клавиша `Alt+Shift+C`.
 - Промпт с жёсткими правилами: опираться только на факты из резюме, без штампов и плейсхолдеров.
 
-[Unreleased]: https://github.com/Hydro-zz/hh-cover-letter/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Hydro-zz/hh-cover-letter/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v1.0.0
 [0.4.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v0.4.0
