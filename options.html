@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>HH Cover Letter — настройки</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0 auto;
+        padding: 24px 20px 60px;
+        max-width: 780px;
+        font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #1f2023;
+        background: #fff;
+      }
+      h1 { margin: 0 0 4px; font-size: 20px; }
+      .sub { margin: 0 0 24px; color: #6a6e77; font-size: 13px; }
+      fieldset { border: 1px solid #dcdfe4; border-radius: 10px; padding: 16px 18px 18px; margin: 0 0 18px; }
+      legend { padding: 0 6px; font-weight: 600; font-size: 13px; color: #4a4d55; }
+      label { display: block; margin: 14px 0 6px; font-size: 13px; font-weight: 600; }
+      label:first-of-type { margin-top: 0; }
+      .note { font-weight: 400; color: #6a6e77; font-size: 12px; }
+      input[type="text"], input[type="password"], input[type="number"], select, textarea {
+        width: 100%; padding: 9px 10px; border: 1px solid #c9ccd2; border-radius: 8px;
+        font: inherit; background: #fff; color: inherit;
+      }
+      textarea { resize: vertical; }
+      input[type="range"] { width: 100%; }
+      .row { display: flex; gap: 10px; align-items: center; }
+      .row > * { flex: 1; }
+      .row > button { flex: 0 0 auto; }
+      button {
+        padding: 9px 14px; border-radius: 8px; border: 1px solid #c9ccd2; background: #f5f6f7;
+        font: inherit; cursor: pointer;
+      }
+      button.primary { background: #d6001c; border-color: #d6001c; color: #fff; font-weight: 600; }
+      button.primary:hover { background: #ec1c33; }
+      .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .status { font-size: 13px; }
+      .status.ok { color: #1f8b3a; }
+      .status.error { color: #c62828; }
+      .status.warn { color: #b26a00; }
+      .note.ok { color: #1f8b3a; }
+      .note.error { color: #c62828; }
+      .note.warn { color: #b26a00; }
+      code, kbd {
+        padding: 1px 5px; border: 1px solid #c9ccd2; border-radius: 4px; font-size: 12px; background: #f5f6f7;
+      }
+      kbd { border-bottom-width: 2px; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #1b1c1f; color: #ecedef; }
+        .sub, .note, legend, .status { color: #a8adb7; }
+        input, select, textarea { background: #26282c; border-color: #3a3d43; color: #ecedef; }
+        button { background: #26282c; border-color: #3a3d43; color: #ecedef; }
+        fieldset { border-color: #3a3d43; }
+        code, kbd { background: #26282c; border-color: #3a3d43; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>HH Cover Letter</h1>
+    <p class="sub">Настройки генерации сопроводительных писем для вакансий hh.ru.</p>
+
+    <fieldset>
+      <legend>Провайдер и модель</legend>
+
+      <label for="provider">Провайдер <span class="note">— все варианты общаются по OpenAI-совместимому протоколу</span></label>
+      <select id="provider"></select>
+
+      <div id="baseUrlBlock" hidden>
+        <label for="baseUrl">Адрес сервера <span class="note">— например https://my-server.example.com/v1</span></label>
+        <input type="text" id="baseUrl" placeholder="https://my-server.example.com/v1" spellcheck="false" autocomplete="off" />
+        <div class="actions" style="margin-top: 10px">
+          <button type="button" id="grantAccess">Разрешить доступ к домену</button>
+        </div>
+        <p class="note" id="permissionNote"></p>
+      </div>
+
+      <label for="apiKey" id="apiKeyLabel">API-ключ</label>
+      <div class="row">
+        <input type="password" id="apiKey" placeholder="sk-…" autocomplete="off" spellcheck="false" />
+        <button type="button" id="toggleKey">Показать</button>
+      </div>
+      <p class="note" id="keyNote"></p>
+
+      <label for="model">Модель <span class="note">— можно вписать своё название</span></label>
+      <input type="text" id="model" list="modelSuggestions" spellcheck="false" autocomplete="off" />
+      <datalist id="modelSuggestions"></datalist>
+      <p class="note" id="modelNote"></p>
+
+      <label for="temperature">
+        Температура: <span id="temperatureValue">0.7</span>
+        <span class="note" id="temperatureNote">(меньше — стабильнее, больше — свободнее)</span>
+      </label>
+      <input type="range" id="temperature" min="0" max="1.5" step="0.1" value="0.7" />
+
+      <label for="maxTokens">Максимум токенов в ответе</label>
+      <input type="number" id="maxTokens" min="200" max="32000" step="500" value="1400" />
+      <p class="note" id="tokenNote"></p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Стиль письма</legend>
+
+      <label for="tone">Тон</label>
+      <select id="tone">
+        <option value="friendly">Дружелюбный, живой</option>
+        <option value="formal">Официально-деловой</option>
+        <option value="concise">Коротко и по делу</option>
+        <option value="enthusiastic">Энергичный</option>
+        <option value="technical">Технический, про технологии</option>
+      </select>
+
+      <label for="length">Объём</label>
+      <select id="length">
+        <option value="short">Короткое — до 900 знаков</option>
+        <option value="medium">Обычное — 1200–1800 знаков</option>
+        <option value="long">Развёрнутое — 2000–2800 знаков</option>
+      </select>
+
+      <label for="language">Язык письма</label>
+      <select id="language">
+        <option value="ru">Русский</option>
+        <option value="en">Английский</option>
+      </select>
+
+      <label for="extra">Дополнительные пожелания <span class="note">(необязательно)</span></label>
+      <textarea id="extra" rows="3" placeholder="Например: не упоминай зарплатные ожидания; подчеркни опыт с Kafka; пиши от женского рода."></textarea>
+    </fieldset>
+
+    <fieldset>
+      <legend>Резюме</legend>
+
+      <label for="resumeUrl">
+        Ссылка на резюме на hh.ru <span class="note">— вида https://hh.ru/resume/…</span>
+      </label>
+      <div class="row">
+        <input type="text" id="resumeUrl" placeholder="https://hh.ru/resume/0123456789abcdef" spellcheck="false" autocomplete="off" />
+        <button type="button" id="loadResume">Загрузить резюме</button>
+      </div>
+      <p class="note">
+        Где взять ссылку: hh.ru → «Мои резюме» → у нужного резюме «…» → «Скопировать ссылку» (или просто откройте
+        резюме и скопируйте адрес из браузера). Если страница резюме уже открыта в другой вкладке, текст возьмётся
+        оттуда, а иначе расширение откроет её само в фоне и закроет.
+      </p>
+
+      <label for="resume">
+        Текст резюме <span class="note">— источник фактов для письма, <span id="resumeLength">0</span> знаков</span>
+      </label>
+      <textarea id="resume" rows="14" spellcheck="true" placeholder="Заполнится кнопкой «Загрузить резюме», либо вставьте текст вручную."></textarea>
+      <div class="actions" style="margin-top: 10px">
+        <button type="button" id="clearResume">Очистить</button>
+      </div>
+      <p class="note">
+        Загруженный текст можно править — лишнее лучше убрать. Если текст резюме пуст, а ссылка указана, при первой
+        генерации письма расширение молча подтянет резюме по ссылке.
+      </p>
+    </fieldset>
+
+    <div class="actions">
+      <button class="primary" id="save">Сохранить</button>
+      <button id="test">Проверить подключение</button>
+      <button id="reloadExtension">Перезагрузить расширение</button>
+      <span class="status" id="status"></span>
+    </div>
+    <p class="note" id="diag" style="margin-top: 10px"></p>
+
+    <p class="note" style="margin-top: 22px">
+      Как пользоваться: откройте вакансию на hh.ru → в правом нижнем углу кнопка «✍ Письмо под вакансию» →
+      «Сгенерировать» → «Вставить в отклик». Отправку отклика расширение никогда не делает само.
+      Быстрый старт с клавиатуры: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd>.
+    </p>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

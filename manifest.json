@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "HH Cover Letter",
+  "version": "1.0.0",
+  "description": "Сопроводительное письмо под каждую вакансию hh.ru: читает вакансию и ваше резюме и пишет текст через LLM.",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8Vm+CcfFspvMC4mtdK9hpBjffJCjrMAL8SVbzxuTRUAiV23j9nvFQ+wdNrdWteyEYSkDovtveOVI5CpL6fPdXUFujL16Q3Qc8NjdiQ3pShrhNMkg5gUXoX1kRpzi0SQ00iBxb1apIpywgatmJDObEtXFs3ng6kNjhl3vTIQFyyJfz7S+wXMG44QGK+1IVFjPUM1qsz+Tq3254Z5KZejQwd7FXLjuiS4VuckRUVM58agjs51IOYhX5NzVZDEQucfRHFqs6K9ZDtrMDN9S0X4GGkkSZFhjFuK2ttnMHAEdUAQk6kJ16IiXzsUWBQFGGf80YkdfoT/Tzrldre67uoYx4QIDAQAB",
+  "permissions": [
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://hh.ru/*",
+    "https://*.hh.ru/*",
+    "https://api.deepseek.com/*",
+    "https://api.openai.com/*",
+    "https://openrouter.ai/*",
+    "https://api.groq.com/*",
+    "https://api.mistral.ai/*",
+    "https://generativelanguage.googleapis.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "HH Cover Letter"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://hh.ru/*",
+        "https://*.hh.ru/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "commands": {
+    "generate-letter": {
+      "suggested_key": {
+        "default": "Alt+Shift+C"
+      },
+      "description": "Сгенерировать письмо для открытой вакансии"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
