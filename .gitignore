@@ -5,6 +5,10 @@ dist/
 *.crx
 *.pem
 
+# зависимости для проверок (jsdom)
+node_modules/
+package-lock.json
+
 # служебное из ОС и редакторов
 Thumbs.db
 Desktop.ini
