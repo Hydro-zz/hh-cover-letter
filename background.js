@@ -2,7 +2,8 @@ import {
   buildMessages,
   isReasonerModel,
   loadSettings,
-  parseResumeUrl,
+  normalizeFullName,
+  parseSourceUrl,
   providerApiKey,
   providerEndpoint,
   providerModel,
@@ -12,9 +13,8 @@ import {
   saveSettings
 } from './lib.js';
 
-const RESUME_PATH = '/resume/';
 const RESUME_MIN_LENGTH = 100;
-const RESUME_WAIT_MS = 15000;
+const PAGE_WAIT_MS = 15000;
 
 class UserError extends Error {}
 
@@ -32,6 +32,7 @@ chrome.runtime.onConnect.addListener((port) => {
     const { signal } = controller;
 
     let context = null;
+    let resumeError = null;
 
     try {
       let settings = await loadSettings();
@@ -51,14 +52,17 @@ chrome.runtime.onConnect.addListener((port) => {
       if (!providerModel(settings)) {
         throw new UserError('Не указано название модели — откройте настройки расширения.');
       }
-      if (!settings.resume.trim() && settings.resumeUrl.trim()) {
+      if (!settings.resume.trim() && (settings.selectedResumeUrl.trim() || settings.resumeUrl.trim())) {
         const refreshed = await refreshResume();
         if (signal.aborted) return;
         if (refreshed.ok) settings = await loadSettings();
+        else resumeError = refreshed.message;
       }
       if (!settings.resume.trim()) {
         throw new UserError(
-          'Не заполнено резюме — откройте настройки расширения и укажите ссылку на резюме или вставьте его текст.'
+          resumeError
+            ? `Резюме не загружено: ${resumeError}`
+            : 'Не заполнено резюме — откройте настройки расширения, укажите ссылку на резюме или профиль и нажмите «Загрузить».'
         );
       }
 
@@ -108,11 +112,12 @@ const MESSAGE_HANDLERS = {
   ping: async () => ({
     ok: true,
     version: chrome.runtime.getManifest().version,
-    features: ['refresh-resume', 'test-connection', 'status']
+    features: ['resolve-source', 'refresh-resume', 'test-connection', 'status']
   }),
   status: () => statusReport(),
   'test-connection': () => testConnection(),
-  'refresh-resume': () => refreshResume()
+  'resolve-source': () => resolveSource(),
+  'refresh-resume': (msg) => refreshResume(msg?.url)
 };
 
 const HANDLED_MESSAGES = Object.keys(MESSAGE_HANDLERS);
@@ -122,7 +127,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!handler) return undefined;
 
   Promise.resolve()
-    .then(handler)
+    .then(() => handler(msg))
     .then((result) => {
       sendResponse(
         result ?? { ok: false, message: `Пустой ответ фоновой части на «${msg.type}» (${HANDLED_MESSAGES.join(', ')}).` }
@@ -137,66 +142,34 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function findResumeTab(targetUrl) {
+async function findHhTab(targetUrl) {
   const tabs = await chrome.tabs.query({});
   const wanted = resumeKey(targetUrl);
+  if (!wanted) return null;
 
-  if (wanted) {
-    const exact = tabs.find((tab) => tab.id && resumeKey(tab.url) === wanted);
-    if (exact) return exact;
-  }
-
-  return (
-    tabs.find((tab) => {
-      if (!tab.id || !tab.url) return false;
-      try {
-        const url = new URL(tab.url);
-        return /(^|\.)hh\.ru$/i.test(url.hostname) && url.pathname.startsWith(RESUME_PATH);
-      } catch {
-        return false;
-      }
-    }) || null
-  );
+  // ищем только точное совпадение: подставлять чужое резюме из открытой вкладки нельзя
+  return tabs.find((tab) => tab.id && resumeKey(tab.url) === wanted) || null;
 }
 
-async function refreshResume() {
-  const settings = await loadSettings();
-  const parsed = parseResumeUrl(settings.resumeUrl);
-  if (!parsed.ok) return { ok: false, message: parsed.reason };
-
-  const openTab = await findResumeTab(parsed.url);
-  const tabUrl = parsed.url || openTab?.url;
-
-  if (!tabUrl) {
-    return {
-      ok: false,
-      message: 'Укажите ссылку на резюме hh.ru в настройках или откройте страницу резюме в отдельной вкладке.'
-    };
-  }
-
+// Открывает страницу hh.ru (в фоне, если её нет среди вкладок), читает разметку и закрывает вкладку за собой.
+async function withHhPage(targetUrl, task) {
+  const openTab = await findHhTab(targetUrl);
   let createdTabId = null;
 
   try {
     let tabId = openTab?.id;
     if (!tabId) {
-      const created = await chrome.tabs.create({ url: tabUrl, active: false });
+      const created = await chrome.tabs.create({ url: targetUrl, active: false });
       createdTabId = created.id;
       tabId = createdTabId;
     }
 
-    const text = await readResumeFromTab(tabId);
-    if (text.length < RESUME_MIN_LENGTH) {
-      return {
-        ok: false,
-        message:
-          'Не удалось прочитать текст резюме. Проверьте, что ссылка открывается под вашим аккаунтом hh.ru и резюме опубликовано.'
-      };
+    const info = await readPageInfo(tabId);
+    if (!info) {
+      return { ok: false, message: 'Не удалось прочитать страницу hh.ru. Проверьте, что ссылка открывается в браузере.' };
     }
 
-    await saveSettings({ resume: text, resumeUrl: tabUrl });
-    return { ok: true, message: `Резюме загружено: ${text.length} знаков.`, resume: text };
-  } catch (error) {
-    return { ok: false, message: describeError(error) };
+    return await task(info);
   } finally {
     if (createdTabId != null) {
       chrome.tabs.remove(createdTabId).catch(() => {});
@@ -204,18 +177,21 @@ async function refreshResume() {
   }
 }
 
-async function readResumeFromTab(tabId) {
-  const deadline = Date.now() + RESUME_WAIT_MS;
-  let best = '';
+async function readPageInfo(tabId) {
+  const deadline = Date.now() + PAGE_WAIT_MS;
+  let best = null;
 
   while (Date.now() < deadline) {
     try {
       const [{ result } = {}] = await chrome.scripting.executeScript({
         target: { tabId },
-        func: extractResumeText
+        func: extractHhPage
       });
-      if (typeof result === 'string' && result.length > best.length) best = result;
-      if (best.length >= RESUME_MIN_LENGTH) return best;
+
+      if (result) {
+        best = result;
+        if (isPageReady(result)) return result;
+      }
     } catch {
       // вкладка ещё грузится или недоступна — просто пробуем снова
     }
@@ -225,7 +201,15 @@ async function readResumeFromTab(tabId) {
   return best;
 }
 
-function extractResumeText() {
+// hh.ru дорисовывает страницы скриптами, поэтому ждём, пока появится имя, текст резюме или список резюме
+const isPageReady = (info) =>
+  Boolean(info.name) ||
+  (info.resumes || []).length > 0 ||
+  (info.isResume && String(info.text || '').length >= RESUME_MIN_LENGTH);
+
+// Разбор страницы: либо резюме (текст), либо профиль (имя и ссылки на резюме).
+// Функция выполняется в контексте вкладки, поэтому не должна ссылаться на внешние переменные.
+function extractHhPage() {
   const clean = (value) =>
     String(value || '')
       .split('\n')
@@ -233,10 +217,160 @@ function extractResumeText() {
       .filter((line, index, all) => line && line !== all[index - 1])
       .join('\n');
 
-  const container =
-    document.querySelector('[data-qa="resume"]') || document.querySelector('main') || document.body;
+  const PERSON_NAME = /^[А-ЯЁA-Z][а-яёa-z'’.-]+(?:\s+[А-ЯЁA-Z][а-яёa-z'’.-]+){1,2}$/;
+  const RESUME_LINK = /\/resume\/([^/?#]+)/i;
 
-  return clean(container.innerText).slice(0, 12000);
+  const candidates = [];
+  const addText = (value) => {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (text) candidates.push(text);
+  };
+
+  const nameSelectors = [
+    '[data-qa="profile-name"]',
+    '[data-qa="applicant-name"]',
+    '[data-qa*="name" i]',
+    '[data-qa*="title" i]',
+    'main h1',
+    'h1',
+    'h2'
+  ];
+
+  for (const selector of nameSelectors) {
+    let nodes;
+    try {
+      nodes = document.querySelectorAll(selector);
+    } catch {
+      continue; // селектор с флагом i может не поддерживаться — пропускаем
+    }
+    for (const node of nodes) addText(node.innerText);
+  }
+
+  const ogTitle = document.querySelector('meta[property="og:title"]');
+  if (ogTitle) addText(ogTitle.content);
+
+  for (const part of String(document.title || '').split(/[—–|·]/)) addText(part);
+
+  const name = candidates.find((text) => PERSON_NAME.test(text)) || '';
+
+  const found = new Map();
+  for (const link of document.querySelectorAll('a[href*="/resume/"]')) {
+    const match = String(link.href || '').match(RESUME_LINK);
+    if (!match) continue;
+
+    const hash = match[1];
+    const url = `${link.origin}/resume/${hash}`;
+    const title = clean(link.innerText)
+      .split('\n')
+      .find((line) => line.length > 2) || '';
+
+    const existing = found.get(hash);
+    if (!existing) found.set(hash, { url, title });
+    else if (!existing.title && title) existing.title = title;
+  }
+
+  const container = document.querySelector('[data-qa="resume"]') || document.querySelector('main') || document.body;
+
+  return {
+    isResume: location.pathname.startsWith('/resume/'),
+    name,
+    resumes: [...found.values()].slice(0, 40),
+    text: clean(container.innerText).slice(0, 12000)
+  };
+}
+
+// Первый шаг: по ссылке из настроек понять, что это — резюме или профиль со списком резюме.
+async function resolveSource() {
+  const settings = await loadSettings();
+  const parsed = parseSourceUrl(settings.resumeUrl);
+
+  if (!parsed.ok) return { ok: false, message: parsed.reason };
+  if (!parsed.url) {
+    return { ok: false, message: 'Укажите ссылку на резюме или на страницу своего профиля hh.ru.' };
+  }
+
+  try {
+    return await withHhPage(parsed.url, async (info) => {
+      const name = normalizeFullName(info.name);
+      const options = (info.resumes || []).filter((item) => item && item.url);
+
+      if (info.isResume) {
+        const text = String(info.text || '');
+        if (text.length < RESUME_MIN_LENGTH) {
+          return {
+            ok: false,
+            message:
+              'Не удалось прочитать текст резюме. Проверьте, что ссылка открывается под вашим аккаунтом hh.ru и резюме опубликовано.'
+          };
+        }
+
+        await saveSettings({
+          resume: text,
+          resumeUrl: parsed.url,
+          selectedResumeUrl: parsed.url,
+          // список, найденный ранее на странице профиля, не затираем пустым значением
+          ...(options.length ? { resumeOptions: options } : {}),
+          fullName: name || settings.fullName
+        });
+
+        return { ok: true, kind: 'resume', name, length: text.length, resume: text, resumes: options };
+      }
+
+      if (!options.length) {
+        return {
+          ok: false,
+          message:
+            'На странице не нашлось ссылок на резюме. Откройте свой профиль на hh.ru под своим аккаунтом или вставьте ссылку на конкретное резюме.'
+        };
+      }
+
+      await saveSettings({ resumeUrl: parsed.url, resumeOptions: options, fullName: name || settings.fullName });
+      return { ok: true, kind: 'list', name, resumes: options };
+    });
+  } catch (error) {
+    return { ok: false, message: describeError(error) };
+  }
+}
+
+// Второй шаг: разобрать конкретное резюме — выбранное в списке или указанное ссылкой.
+async function refreshResume(explicitUrl) {
+  const settings = await loadSettings();
+  const source = String(explicitUrl || '').trim() || settings.selectedResumeUrl || settings.resumeUrl;
+  const parsed = parseSourceUrl(source);
+
+  if (!parsed.ok) return { ok: false, message: parsed.reason };
+  if (!parsed.url) return { ok: false, message: 'Не выбрано резюме: укажите ссылку на резюме или на профиль.' };
+
+  if (parsed.kind !== 'resume') {
+    return {
+      ok: false,
+      message: 'Для разбора нужно конкретное резюме, а не страница профиля. Выберите резюме в списке настроек.'
+    };
+  }
+
+  try {
+    return await withHhPage(parsed.url, async (info) => {
+      const text = String(info.text || '');
+      if (text.length < RESUME_MIN_LENGTH) {
+        return {
+          ok: false,
+          message:
+            'Не удалось прочитать текст резюме. Проверьте, что ссылка открывается под вашим аккаунтом hh.ru и резюме опубликовано.'
+        };
+      }
+
+      const name = normalizeFullName(info.name);
+      await saveSettings({
+        resume: text,
+        selectedResumeUrl: parsed.url,
+        fullName: name || settings.fullName
+      });
+
+      return { ok: true, message: `Резюме загружено: ${text.length} знаков.`, resume: text, name };
+    });
+  } catch (error) {
+    return { ok: false, message: describeError(error) };
+  }
 }
 
 async function streamCompletion({ settings, provider, messages, port, signal }) {
@@ -434,6 +568,10 @@ async function statusReport() {
     needsKey: provider.requiresKey,
     hasKey: !provider.requiresKey || Boolean(providerApiKey(settings)),
     hasResume: Boolean(settings.resume.trim() || settings.resumeUrl.trim()),
-    hasResumeText: Boolean(settings.resume.trim())
+    hasResumeText: Boolean(settings.resume.trim()),
+    fullName: settings.fullName || '',
+    hasName: Boolean((settings.fullName || '').trim()),
+    resumeOptions: Array.isArray(settings.resumeOptions) ? settings.resumeOptions.length : 0,
+    selectedResumeUrl: settings.selectedResumeUrl || ''
   };
 }

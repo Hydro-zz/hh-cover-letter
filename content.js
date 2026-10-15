@@ -304,6 +304,12 @@
       lines.push({ text: 'резюме подтянется по ссылке при генерации' });
     }
 
+    if (status && status.hasName) {
+      lines.push({ text: `подпись: ${status.fullName}` });
+    } else if (status) {
+      lines.push({ text: '⚠ имя для подписи не задано', warn: true });
+    }
+
     if (!status) {
       lines.push({ text: '⚠ фоновая часть расширения не отвечает', warn: true });
     } else if (status.model) {

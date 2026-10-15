@@ -11,7 +11,10 @@ export const DEFAULT_SETTINGS = {
   language: 'ru',
   extra: '',
   resumeUrl: '',
-  resume: ''
+  resume: '',
+  selectedResumeUrl: '',
+  resumeOptions: [],
+  fullName: ''
 };
 
 // Все провайдеры ниже общаются по OpenAI-совместимому протоколу
@@ -201,11 +204,13 @@ export async function saveSettings(patch) {
   return next;
 }
 
-const RESUME_PATH = '/resume/';
+const RESUME_PATH = /^\/resume\//i;
 
-export function parseResumeUrl(value) {
+// Источником может быть как конкретное резюме, так и страница профиля: с профиля
+// забираем имя кандидата и ссылки на его резюме.
+export function parseSourceUrl(value) {
   const raw = String(value || '').trim();
-  if (!raw) return { ok: true, url: '' };
+  if (!raw) return { ok: true, url: '', kind: 'empty' };
 
   const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
 
@@ -213,15 +218,26 @@ export function parseResumeUrl(value) {
   try {
     parsed = new URL(candidate);
   } catch {
-    return { ok: false, reason: 'Это не похоже на ссылку. Нужен адрес вида https://hh.ru/resume/…' };
+    return { ok: false, reason: 'Это не похоже на ссылку. Нужен адрес вида https://hh.ru/resume/… или страница профиля.' };
   }
 
-  if (!/(^|\.)hh\.ru$/i.test(parsed.hostname) || !parsed.pathname.startsWith(RESUME_PATH)) {
-    return { ok: false, reason: 'Нужна ссылка на резюме hh.ru вида https://hh.ru/resume/…' };
+  if (!/(^|\.)hh\.ru$/i.test(parsed.hostname)) {
+    return { ok: false, reason: 'Нужна ссылка на hh.ru: страница резюме или профиля.' };
   }
 
   parsed.hash = '';
-  return { ok: true, url: parsed.href };
+  return { ok: true, url: parsed.href, kind: RESUME_PATH.test(parsed.pathname) ? 'resume' : 'page' };
+}
+
+export function normalizeFullName(value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function resumeHash(value) {
+  const match = String(value || '').match(/\/resume\/([^/?#]+)/i);
+  return match ? match[1] : '';
 }
 
 export function resumeKey(value) {
@@ -235,6 +251,7 @@ export function resumeKey(value) {
 
 export function buildMessages(settings, vacancy, resumeText) {
   const language = settings.language === 'en' ? 'английском' : 'русском';
+  const fullName = normalizeFullName(settings.fullName);
 
   const system = [
     'Ты — опытный карьерный консультант. Ты пишешь сопроводительное письмо от первого лица от имени кандидата, который откликается на вакансию на hh.ru.',
@@ -243,7 +260,7 @@ export function buildMessages(settings, vacancy, resumeText) {
     `1. Язык письма — ${language}.`,
     '2. Опирайся ТОЛЬКО на факты из резюме кандидата. Ничего не выдумывай: ни опыт, ни компании, ни технологии, ни цифры, которых нет в резюме.',
     '3. Связывай опыт кандидата с конкретными требованиями и задачами из текста вакансии, называя их так, как они названы в вакансии.',
-    '4. Не оставляй плейсхолдеров и квадратных скобок вида [Ваше имя] или {{company}}: либо бери данные из резюме и вакансии, либо перестраивай фразу.',
+    '4. Письмо должно быть готово к отправке: в нём не может быть мест для ручной подстановки. Запрещены квадратные и фигурные скобки, конструкции вида [Ваше имя], {{company}}, «Имя Фамилия», «Ваше имя», «подпись», «контакты».',
     '5. Без штампов, не подтверждённых резюме: «быстро обучаюсь», «командный игрок», «стрессоустойчив», «легко нахожу общий язык».',
     '6. Без markdown, списков, заголовков и эмодзи — только обычный текст с абзацами.',
     '7. Не оценивай кандидата («идеально подхожу») — приводи факты и результаты.',
@@ -251,7 +268,16 @@ export function buildMessages(settings, vacancy, resumeText) {
     `Тон: ${TONE_HINTS[settings.tone] || TONE_HINTS.friendly}.`,
     `Объём: ${LENGTH_HINTS[settings.length] || LENGTH_HINTS.medium}.`,
     'Начни с приветствия, в первом абзаце укажи позицию, на которую откликается кандидат, и название компании, если оно известно.',
-    'В конце — короткая подпись: имя кандидата, если оно есть в резюме, и один контакт из резюме, если он там указан. Контакты не выдумывай.'
+    ...(fullName
+      ? [
+          `9. Кандидата зовут ${fullName}. Подпиши письмо ровно так: ${fullName}.`,
+          'Даже если в резюме имя не указано или указано иначе, в подписи используй именно это имя и никакое другое.',
+          `10. Если уместно обращение по имени в тексте, используй ${fullName}.`
+        ]
+      : [
+          '9. Имя кандидата неизвестно. Не придумывай имя и не оставляй места для его подстановки: закончи письмо подписью без имени («С уважением» и контакт, если он есть в резюме).'
+        ]),
+    'В конце — короткая подпись и один контакт из резюме, если он там указан. Контакты не выдумывай: если контакта в резюме нет, подпись остаётся без него.'
   ].join('\n');
 
   const vacancyText = [
@@ -272,6 +298,9 @@ export function buildMessages(settings, vacancy, resumeText) {
   const user = [
     '# ВАКАНСИЯ',
     clip(vacancyText, 9000),
+    '',
+    '# КАНДИДАТ',
+    fullName ? `Имя для подписи: ${fullName}` : 'Имя для подписи: не указано, подпись должна быть без имени',
     '',
     '# РЕЗЮМЕ КАНДИДАТА',
     clip(resumeText || '(резюме не заполнено)', 9000),

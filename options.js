@@ -4,7 +4,9 @@ import {
   isReasonerModel,
   loadSettings,
   normalizeBaseUrl,
-  parseResumeUrl,
+  normalizeFullName,
+  parseSourceUrl,
+  resumeHash,
   resolveProvider,
   saveSettings
 } from './lib.js';
@@ -177,7 +179,7 @@ function apply(next) {
   $('temperatureValue').textContent = String(next.temperature);
   $('maxTokens').value = String(next.maxTokens);
 
-  for (const id of ['tone', 'length', 'language', 'extra', 'resumeUrl', 'resume']) {
+  for (const id of ['tone', 'length', 'language', 'extra', 'resumeUrl', 'resume', 'fullName']) {
     $(id).value = next[id] ?? '';
   }
 
@@ -185,6 +187,50 @@ function apply(next) {
   syncProviderUi();
   syncModelUi();
   refreshPermissionNote();
+  renderResumePicker(next.resumeOptions, next.selectedResumeUrl);
+  syncNameNote();
+}
+
+const personName = () => normalizeFullName($('fullName').value);
+
+function syncNameNote() {
+  const name = personName();
+  const note = $('nameNote');
+
+  if (name) {
+    note.textContent = `Имя «${name}» попадёт в подпись письма: подставлять вручную ничего не придётся.`;
+    note.className = 'note ok';
+    return;
+  }
+
+  note.textContent =
+    'Имя не задано. Если его нет и в тексте резюме, модель подпишет письмо без имени — заглушек вида «[Ваше имя]» она не оставит.';
+  note.className = 'note warn';
+}
+
+function renderResumePicker(options, selectedUrl) {
+  const picker = $('resumePicker');
+  const select = $('resumeChoice');
+  const list = Array.isArray(options) ? options.filter((item) => item && item.url) : [];
+
+  if (!list.length) {
+    picker.hidden = true;
+    select.replaceChildren();
+    return;
+  }
+
+  select.replaceChildren(
+    ...list.map((item) => {
+      const option = document.createElement('option');
+      option.value = item.url;
+      option.textContent = item.title ? `${item.title} (${resumeHash(item.url).slice(0, 8)}…)` : `Резюме ${resumeHash(item.url).slice(0, 8)}…`;
+      return option;
+    })
+  );
+
+  const wanted = list.some((item) => item.url === selectedUrl) ? selectedUrl : list[0].url;
+  select.value = wanted;
+  picker.hidden = false;
 }
 
 function collect() {
@@ -199,6 +245,7 @@ function collect() {
     language: $('language').value,
     extra: $('extra').value,
     resumeUrl: $('resumeUrl').value.trim(),
+    fullName: normalizeFullName($('fullName').value),
     resume: $('resume').value
   };
 }
@@ -209,7 +256,7 @@ async function persist({ silent = false } = {}) {
   const preset = presetOf(providerId);
   let notice = null;
 
-  const parsedUrl = parseResumeUrl(values.resumeUrl);
+  const parsedUrl = parseSourceUrl(values.resumeUrl);
   if (parsedUrl.ok) {
     values.resumeUrl = parsedUrl.url;
     $('resumeUrl').value = parsedUrl.url;
@@ -344,17 +391,41 @@ $('test').addEventListener('click', async () => {
   await checkBackground();
 });
 
+// Разбирает конкретное резюме и подставляет текст с именем в форму.
+async function loadSelectedResume(url) {
+  setStatus('Читаю резюме…');
+
+  const saved = await saveSettings({ selectedResumeUrl: url });
+  settings = saved;
+  $('resumeChoice').value = url;
+
+  const result = await callBackground({ type: 'refresh-resume', url });
+  if (!result?.ok) {
+    setStatus(result?.message || STALE_WORKER_HINT, 'error');
+    return false;
+  }
+
+  if (typeof result.resume === 'string') $('resume').value = result.resume;
+  if (result.name) $('fullName').value = result.name;
+
+  updateResumeLength();
+  syncNameNote();
+  await persist({ silent: true });
+  setStatus(`Резюме загружено: ${result.resume?.length ?? 0} знаков.`, 'ok');
+  return true;
+}
+
 $('loadResume').addEventListener('click', async () => {
-  const parsed = parseResumeUrl($('resumeUrl').value);
+  const parsed = parseSourceUrl($('resumeUrl').value);
   if (!parsed.ok) {
     setStatus(parsed.reason, 'error');
     return;
   }
 
-  setStatus('Загружаю резюме…');
+  setStatus('Читаю страницу hh.ru…');
   await persist({ silent: true });
 
-  const result = await callBackground({ type: 'refresh-resume' });
+  const result = await callBackground({ type: 'resolve-source' });
   await checkBackground();
 
   if (!result?.ok) {
@@ -362,11 +433,44 @@ $('loadResume').addEventListener('click', async () => {
     return;
   }
 
-  if (typeof result.resume === 'string') $('resume').value = result.resume;
-  $('resumeUrl').value = (await loadSettings()).resumeUrl;
-  updateResumeLength();
-  setStatus(result.message, 'ok');
+  if (result.name) {
+    $('fullName').value = result.name;
+    syncNameNote();
+  }
+
+  if (result.kind === 'resume') {
+    if (typeof result.resume === 'string') $('resume').value = result.resume;
+    renderResumePicker(result.resumes, parsed.url);
+    updateResumeLength();
+    await persist({ silent: true });
+    setStatus(
+      `Резюме загружено: ${result.resume?.length ?? 0} знаков.${result.name ? ` Имя: ${result.name}.` : ''}`,
+      'ok'
+    );
+    return;
+  }
+
+  renderResumePicker(result.resumes, null);
+
+  if (result.resumes.length === 1) {
+    setStatus('Нашлось одно резюме — разбираю его…');
+    await loadSelectedResume(result.resumes[0].url);
+    return;
+  }
+
+  await persist({ silent: true });
+  setStatus(
+    `Найдено резюме: ${result.resumes.length}. Выберите нужное в списке «Какое резюме разобрать».` +
+      (result.name
+        ? ` Имя из профиля: ${result.name}.`
+        : ' Имя на странице не нашлось — впишите его в поле «Имя и фамилия для подписи».'),
+    result.name ? 'ok' : 'warn'
+  );
 });
+
+$('resumeChoice').addEventListener('change', () => loadSelectedResume($('resumeChoice').value));
+
+$('fullName').addEventListener('input', syncNameNote);
 
 $('reloadExtension').addEventListener('click', () => chrome.runtime.reload());
 

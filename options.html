@@ -131,31 +131,44 @@
     </fieldset>
 
     <fieldset>
-      <legend>Резюме</legend>
+      <legend>Резюме и имя</legend>
 
       <label for="resumeUrl">
-        Ссылка на резюме на hh.ru <span class="note">— вида https://hh.ru/resume/…</span>
+        Ссылка на резюме или на профиль hh.ru
+        <span class="note">— https://hh.ru/resume/… либо страница вашего профиля</span>
       </label>
       <div class="row">
         <input type="text" id="resumeUrl" placeholder="https://hh.ru/resume/0123456789abcdef" spellcheck="false" autocomplete="off" />
-        <button type="button" id="loadResume">Загрузить резюме</button>
+        <button type="button" id="loadResume">Загрузить</button>
       </div>
       <p class="note">
-        Где взять ссылку: hh.ru → «Мои резюме» → у нужного резюме «…» → «Скопировать ссылку» (или просто откройте
-        резюме и скопируйте адрес из браузера). Если страница резюме уже открыта в другой вкладке, текст возьмётся
-        оттуда, а иначе расширение откроет её само в фоне и закроет.
+        Ссылку на резюме берут так: hh.ru → «Мои резюме» → у нужного резюме «…» → «Скопировать ссылку». Можно указать
+        и ссылку на страницу профиля: тогда расширение возьмёт оттуда ваше имя и список резюме, а вы выберете нужное.
+        Страница открывается в фоне и закрывается автоматически.
       </p>
+
+      <div id="resumePicker" hidden>
+        <label for="resumeChoice">Какое резюме разобрать</label>
+        <select id="resumeChoice"></select>
+      </div>
+
+      <label for="fullName">
+        Имя и фамилия для подписи
+        <span class="note">— попадут в письмо, чтобы ничего не пришлось дописывать вручную</span>
+      </label>
+      <input type="text" id="fullName" placeholder="Иван Иванов" autocomplete="off" spellcheck="false" />
+      <p class="note" id="nameNote"></p>
 
       <label for="resume">
         Текст резюме <span class="note">— источник фактов для письма, <span id="resumeLength">0</span> знаков</span>
       </label>
-      <textarea id="resume" rows="14" spellcheck="true" placeholder="Заполнится кнопкой «Загрузить резюме», либо вставьте текст вручную."></textarea>
+      <textarea id="resume" rows="14" spellcheck="true" placeholder="Заполнится кнопкой «Загрузить», либо вставьте текст вручную."></textarea>
       <div class="actions" style="margin-top: 10px">
         <button type="button" id="clearResume">Очистить</button>
       </div>
       <p class="note">
-        Загруженный текст можно править — лишнее лучше убрать. Если текст резюме пуст, а ссылка указана, при первой
-        генерации письма расширение молча подтянет резюме по ссылке.
+        Загруженный текст можно править — лишнее лучше убрать. Если текст пуст, при генерации письма расширение
+        подтянет резюме по ссылке само.
       </p>
     </fieldset>
 
