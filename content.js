@@ -169,6 +169,14 @@
     .status.error { color: #ff6b6b; }
     .status.warn { color: #ffb547; }
     .row { display: flex; gap: 8px; }
+    .resumeRow { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #a8adb7; }
+    .resumeRow[hidden] { display: none; }
+    .resumeRow label { flex: none; }
+    .resumeRow select {
+      flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; border: 1px solid #3a3d43;
+      background: #17181a; color: #ecedef; font-size: 12px; font-family: inherit;
+    }
+    .resumeRow select:focus { outline: none; border-color: #d6001c; }
     button {
       flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid #3a3d43; background: #26282c;
       color: #ecedef; font-size: 12px; font-family: inherit; cursor: pointer;
@@ -202,6 +210,10 @@
         </header>
         <div class="body">
           <div class="vacancy"></div>
+          <div class="resumeRow" hidden>
+            <label>Резюме</label>
+            <select class="resume"></select>
+          </div>
           <textarea placeholder="Здесь появится письмо. Можно править текст прямо здесь."></textarea>
           <div class="status"></div>
           <div class="row">
@@ -224,6 +236,8 @@
       launcher: shadow.querySelector('.launcher'),
       panel: shadow.querySelector('.panel'),
       vacancy: shadow.querySelector('.vacancy'),
+      resumeRow: shadow.querySelector('.resumeRow'),
+      resumeSelect: shadow.querySelector('.resumeRow select'),
       letter: shadow.querySelector('textarea'),
       status: shadow.querySelector('.status'),
       generate: shadow.querySelector('.generate'),
@@ -239,6 +253,7 @@
     els.insert.addEventListener('click', insertIntoResponse);
     els.copy.addEventListener('click', copyLetter);
     els.options.addEventListener('click', () => chrome.runtime.openOptionsPage());
+    els.resumeSelect.addEventListener('change', () => chooseResume(els.resumeSelect.value));
     els.letter.addEventListener('input', () => {
       if (busy) return;
       els.insert.disabled = !els.letter.value.trim();
@@ -284,6 +299,68 @@
     }
   }
 
+  const trimUrl = (value) => String(value || '').replace(/[?#].*$/, '');
+
+  function findResumeEntry(status, url) {
+    const wanted = trimUrl(url);
+    if (!wanted) return null;
+    return (status?.resumes || []).find((item) => trimUrl(item.url) === wanted) || null;
+  }
+
+  function defaultResumeUrl(status) {
+    const fromVacancy = (status?.resumeByVacancy || {})[extractVacancy().url];
+    if (fromVacancy && findResumeEntry(status, fromVacancy)) return fromVacancy;
+    if (status?.selectedResumeUrl && findResumeEntry(status, status.selectedResumeUrl)) return status.selectedResumeUrl;
+    return status?.resumes?.[0]?.url || '';
+  }
+
+  const currentResumeUrl = () => ui?.resumeSelect.value || '';
+
+  // Если в настройках загружено несколько резюме, для конкретной вакансии можно взять другое.
+  function syncResumeSelect(status) {
+    if (!ui) return;
+
+    const list = status?.resumes || [];
+    if (!list.length) {
+      ui.resumeRow.hidden = true;
+      ui.resumeSelect.replaceChildren();
+      return;
+    }
+
+    const previous = ui.resumeSelect.value;
+
+    ui.resumeSelect.replaceChildren(
+      ...list.map((item) => {
+        const option = document.createElement('option');
+        option.value = item.url;
+        const title = item.title || `Резюме ${(item.url.split('/resume/')[1] || '').slice(0, 8)}`;
+        option.textContent = item.hasText ? title : `${title} — не прочитано`;
+        return option;
+      })
+    );
+
+    ui.resumeSelect.value = findResumeEntry(status, previous) ? previous : defaultResumeUrl(status);
+    ui.resumeRow.hidden = false;
+  }
+
+  async function chooseResume(url) {
+    if (!url || !ui) return;
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'set-vacancy-resume',
+        vacancyUrl: extractVacancy().url,
+        resumeUrl: url
+      });
+    } catch {
+      // фоновая часть недоступна: выбор всё равно применится к текущей генерации
+    }
+
+    const label = ui.resumeSelect.selectedOptions[0]?.textContent || url;
+    setStatus(`Для этой вакансии выбрано резюме: ${label}`, 'info');
+    await refreshHint();
+  }
+
   async function refreshHint() {
     if (!ui) return;
     const status = await fetchStatus();
@@ -298,10 +375,17 @@
     if (status && !status.hasKey) warnings.push(`нет API-ключа ${status.provider}`);
     for (const warning of warnings) lines.push({ text: `⚠ ${warning}`, warn: true });
 
-    if (status && !status.hasResume) {
-      lines.push({ text: '⚠ нет резюме', warn: true });
-    } else if (status && !status.hasResumeText) {
-      lines.push({ text: 'резюме подтянется по ссылке при генерации' });
+    syncResumeSelect(status);
+
+    if (!status) {
+      lines.push({ text: '⚠ фоновая часть расширения не отвечает', warn: true });
+    } else if (!status.resumes?.length) {
+      lines.push({ text: '⚠ нет резюме: загрузите профиль в настройках', warn: true });
+    } else {
+      const entry = findResumeEntry(status, currentResumeUrl());
+      if (entry && !entry.hasText) {
+        lines.push({ text: '⚠ текст выбранного резюме не прочитан', warn: true });
+      }
     }
 
     if (status && status.hasName) {
@@ -310,9 +394,7 @@
       lines.push({ text: '⚠ имя для подписи не задано', warn: true });
     }
 
-    if (!status) {
-      lines.push({ text: '⚠ фоновая часть расширения не отвечает', warn: true });
-    } else if (status.model) {
+    if (status?.model) {
       lines.push({ text: `${status.provider}: ${status.model}` });
     }
 
@@ -354,16 +436,17 @@
       setStatus('Не указана модель. Откройте «Настройки» и выберите модель.', 'error');
       return;
     }
-    if (!status.hasResume) {
-      setStatus('Не заполнено резюме. Откройте «Настройки» и укажите ссылку на резюме или вставьте его текст.', 'error');
+    if (!status.resumes?.length) {
+      setStatus('Резюме не загружены. Откройте «Настройки» и загрузите страницу профиля hh.ru.', 'error');
       return;
     }
 
     const vacancy = extractVacancy();
-    const fetchingResume = !status.hasResumeText;
+    const resumeUrl = currentResumeUrl() || defaultResumeUrl(status);
+    const entry = findResumeEntry(status, resumeUrl);
 
-    if (fetchingResume) {
-      setStatus('Подтягиваю резюме по ссылке и генерирую письмо…', 'info');
+    if (entry && !entry.hasText) {
+      setStatus('Текст выбранного резюме не прочитан — читаю его и генерирую письмо…', 'info');
     } else if (vacancy.description.length < MIN_DESCRIPTION) {
       setStatus('Не удалось прочитать текст вакансии — письмо получится менее точным.', 'warn');
     } else {
@@ -405,7 +488,7 @@
       if (busy) finishStream();
     });
 
-    current.postMessage({ type: 'generate', vacancy });
+    current.postMessage({ type: 'generate', vacancy, resumeUrl });
   }
 
   function finishStream() {

@@ -10,6 +10,10 @@ import {
   resolveMaxTokens,
   resolveProvider,
   resumeKey,
+  resumeList,
+  resumeTextFor,
+  resumeTitle,
+  resumeUrlForVacancy,
   saveSettings
 } from './lib.js';
 
@@ -52,21 +56,28 @@ chrome.runtime.onConnect.addListener((port) => {
       if (!providerModel(settings)) {
         throw new UserError('Не указано название модели — откройте настройки расширения.');
       }
-      if (!settings.resume.trim() && (settings.selectedResumeUrl.trim() || settings.resumeUrl.trim())) {
-        const refreshed = await refreshResume();
+      // резюме для этой вакансии: выбор в панели важнее выбора в настройках
+      const vacancyUrl = String(msg.vacancy?.url || '');
+      const resumeUrl = String(msg.resumeUrl || '').trim() || resumeUrlForVacancy(settings, vacancyUrl);
+      let resumeText = resumeTextFor(settings, resumeUrl);
+
+      if (!resumeText && resumeUrl) {
+        const refreshed = await refreshResume(resumeUrl);
         if (signal.aborted) return;
-        if (refreshed.ok) settings = await loadSettings();
-        else resumeError = refreshed.message;
+        settings = await loadSettings();
+        resumeText = resumeTextFor(settings, resumeUrl);
+        if (!resumeText) resumeError = refreshed.message;
       }
-      if (!settings.resume.trim()) {
+      if (!resumeText) {
         throw new UserError(
-          resumeError
-            ? `Резюме не загружено: ${resumeError}`
-            : 'Не заполнено резюме — откройте настройки расширения, укажите ссылку на резюме или профиль и нажмите «Загрузить».'
+          resumeError ||
+            (resumeList(settings).length
+              ? 'Текст выбранного резюме пуст. Откройте настройки и нажмите «Загрузить» — расширение прочитает резюме заново.'
+              : 'Не заполнено резюме — откройте настройки, укажите ссылку на профиль или резюме и нажмите «Загрузить».')
         );
       }
 
-      const messages = buildMessages(settings, msg.vacancy || {}, settings.resume);
+      const messages = buildMessages(settings, msg.vacancy || {}, resumeText);
       const { content, reasoningLength, finishReason } = await streamCompletion({
         settings,
         provider,
@@ -95,6 +106,33 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'resumes') return;
+
+  let stopped = false;
+  port.onDisconnect.addListener(() => {
+    stopped = true;
+  });
+
+  port.onMessage.addListener(async (msg) => {
+    if (msg?.type !== 'parse') return;
+
+    try {
+      const result = await parseAllResumes({
+        force: Boolean(msg.force),
+        shouldStop: () => stopped,
+        onProgress: (progress) => port.postMessage({ type: 'progress', ...progress })
+      });
+
+      if (stopped) return;
+      port.postMessage(result.aborted ? { type: 'error', message: 'Разбор прерван.' } : { type: 'done', ...result });
+    } catch (error) {
+      if (stopped) return;
+      port.postMessage({ type: 'error', message: describeError(error) });
+    }
+  });
+});
+
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'generate-letter') return;
 
@@ -117,7 +155,8 @@ const MESSAGE_HANDLERS = {
   status: () => statusReport(),
   'test-connection': () => testConnection(),
   'resolve-source': () => resolveSource(),
-  'refresh-resume': (msg) => refreshResume(msg?.url)
+  'refresh-resume': (msg) => refreshResume(msg?.url),
+  'set-vacancy-resume': (msg) => setVacancyResume(msg?.vacancyUrl, msg?.resumeUrl)
 };
 
 const HANDLED_MESSAGES = Object.keys(MESSAGE_HANDLERS);
@@ -354,16 +393,16 @@ async function resolveSource() {
           };
         }
 
+        const entries = mergeResumes(settings.resumes, [{ url: parsed.url, title: resumeTitle(settings, parsed.url) }]);
         await saveSettings({
-          resume: text,
           resumeUrl: parsed.url,
           selectedResumeUrl: parsed.url,
-          // список, найденный ранее на странице профиля, не затираем пустым значением
-          ...(options.length ? { resumeOptions: options } : {}),
+          resumes: entries,
           fullName: name || settings.fullName
         });
+        await updateResumeEntry(parsed.url, { text, error: '' });
 
-        return { ok: true, kind: 'resume', name, length: text.length, resume: text, resumes: options };
+        return { ok: true, kind: 'resume', name, resumes: resumeList(await loadSettings()) };
       }
 
       if (!options.length) {
@@ -374,53 +413,136 @@ async function resolveSource() {
         };
       }
 
-      await saveSettings({ resumeUrl: parsed.url, resumeOptions: options, fullName: name || settings.fullName });
-      return { ok: true, kind: 'list', name, resumes: options };
+      const entries = mergeResumes(settings.resumes, options);
+      await saveSettings({ resumeUrl: parsed.url, resumes: entries, fullName: name || settings.fullName });
+      return { ok: true, kind: 'list', name, resumes: resumeList(await loadSettings()) };
     });
   } catch (error) {
     return { ok: false, message: describeError(error) };
   }
 }
 
-// Второй шаг: разобрать конкретное резюме — выбранное в списке или указанное ссылкой.
-async function refreshResume(explicitUrl) {
+// Сохраняем уже прочитанные тексты: список с профиля лишь уточняет названия и адреса.
+function mergeResumes(existing, incoming) {
+  const current = Array.isArray(existing) ? existing.filter((item) => item && item.url) : [];
+
+  return incoming
+    .filter((item) => item && item.url)
+    .map((item) => {
+      const previous = current.find((old) => resumeKey(old.url) === resumeKey(item.url));
+      return {
+        url: String(item.url),
+        title: String(item.title || previous?.title || ''),
+        text: String(previous?.text || ''),
+        error: ''
+      };
+    });
+}
+
+async function updateResumeEntry(url, patch) {
   const settings = await loadSettings();
-  const source = String(explicitUrl || '').trim() || settings.selectedResumeUrl || settings.resumeUrl;
-  const parsed = parseSourceUrl(source);
+  const target = resumeKey(url);
 
-  if (!parsed.ok) return { ok: false, message: parsed.reason };
-  if (!parsed.url) return { ok: false, message: 'Не выбрано резюме: укажите ссылку на резюме или на профиль.' };
+  const resumes = (settings.resumes || []).map((item) =>
+    resumeKey(item.url) === target ? { ...item, ...patch } : item
+  );
 
-  if (parsed.kind !== 'resume') {
-    return {
-      ok: false,
-      message: 'Для разбора нужно конкретное резюме, а не страница профиля. Выберите резюме в списке настроек.'
-    };
-  }
+  await saveSettings({ resumes });
+  return resumes;
+}
 
+// Читает текст одного резюме в фоновой вкладке.
+async function readResumeText(url) {
   try {
-    return await withHhPage(parsed.url, async (info) => {
+    return await withHhPage(url, async (info) => {
       const text = String(info.text || '');
       if (text.length < RESUME_MIN_LENGTH) {
         return {
           ok: false,
-          message:
-            'Не удалось прочитать текст резюме. Проверьте, что ссылка открывается под вашим аккаунтом hh.ru и резюме опубликовано.'
+          text: '',
+          message: 'не удалось прочитать текст — проверьте, что резюме открывается под вашим аккаунтом hh.ru'
         };
       }
-
-      const name = normalizeFullName(info.name);
-      await saveSettings({
-        resume: text,
-        selectedResumeUrl: parsed.url,
-        fullName: name || settings.fullName
-      });
-
-      return { ok: true, message: `Резюме загружено: ${text.length} знаков.`, resume: text, name };
+      return { ok: true, text, message: '' };
     });
   } catch (error) {
-    return { ok: false, message: describeError(error) };
+    return { ok: false, text: '', message: describeError(error) };
   }
+}
+
+// Последовательно разбирает все резюме из списка, отмечая уже прочитанные.
+async function parseAllResumes({ force, shouldStop, onProgress }) {
+  const settings = await loadSettings();
+  const list = (settings.resumes || []).filter((item) => item && item.url);
+
+  if (!list.length) {
+    return { ok: false, message: 'Список резюме пуст: сначала загрузите страницу профиля или ссылку на резюме.' };
+  }
+
+  let processed = 0;
+  let parsed = 0;
+  let failed = 0;
+
+  for (const item of list) {
+    if (shouldStop?.()) return { ok: false, message: '', aborted: true };
+
+    const alreadyRead = Boolean(String(item.text || '').trim());
+    const skip = alreadyRead && !force;
+    let error = '';
+
+    if (skip) {
+      parsed += 1;
+    } else {
+      onProgress?.({ done: processed, total: list.length, title: item.title, current: true });
+      const result = await readResumeText(item.url);
+      if (result.ok) parsed += 1;
+      else {
+        failed += 1;
+        error = result.message;
+      }
+      await updateResumeEntry(item.url, { text: result.text || '', error });
+    }
+
+    processed += 1;
+    onProgress?.({ done: processed, total: list.length, title: item.title, error, skipped: skip });
+  }
+
+  const fresh = await loadSettings();
+  return { ok: true, resumes: resumeList(fresh), parsed, failed, total: list.length };
+}
+
+// Разбор одного резюме — когда текст нужно перечитать точечно.
+async function refreshResume(explicitUrl) {
+  const settings = await loadSettings();
+  const url = String(explicitUrl || '').trim() || settings.selectedResumeUrl || resumeUrlForVacancy(settings, '');
+
+  if (!url) return { ok: false, message: 'Резюме не выбрано: загрузите страницу профиля или ссылку на резюме.' };
+
+  const result = await readResumeText(url);
+  await updateResumeEntry(url, { text: result.text || '', error: result.message });
+
+  if (!result.ok) return { ok: false, message: `Резюме не прочитано: ${result.message}.` };
+
+  return {
+    ok: true,
+    message: `Резюме прочитано: ${result.text.length} знаков.`,
+    resumes: resumeList(await loadSettings())
+  };
+}
+
+// Выбор резюме для конкретной вакансии: в панели можно отклониться от значения из настроек.
+async function setVacancyResume(vacancyUrl, resumeUrl) {
+  const key = String(vacancyUrl || '').trim();
+  if (!key) return { ok: false, message: 'Не удалось определить адрес вакансии.' };
+
+  const settings = await loadSettings();
+  const map = { ...(settings.resumeByVacancy || {}) };
+
+  if (resumeUrl) map[key] = String(resumeUrl);
+  else delete map[key];
+
+  await saveSettings({ resumeByVacancy: map });
+  return { ok: true, selectedResumeUrl: String(resumeUrl || '') };
 }
 
 async function streamCompletion({ settings, provider, messages, port, signal }) {
@@ -617,11 +739,12 @@ async function statusReport() {
     model: providerModel(settings),
     needsKey: provider.requiresKey,
     hasKey: !provider.requiresKey || Boolean(providerApiKey(settings)),
-    hasResume: Boolean(settings.resume.trim() || settings.resumeUrl.trim()),
-    hasResumeText: Boolean(settings.resume.trim()),
+    hasResume: resumeList(settings).length > 0,
+    hasResumeText: resumeList(settings).some((item) => item.hasText),
+    resumes: resumeList(settings),
+    resumeByVacancy: settings.resumeByVacancy || {},
+    selectedResumeUrl: resumeUrlForVacancy(settings, ''),
     fullName: settings.fullName || '',
-    hasName: Boolean((settings.fullName || '').trim()),
-    resumeOptions: Array.isArray(settings.resumeOptions) ? settings.resumeOptions.length : 0,
-    selectedResumeUrl: settings.selectedResumeUrl || ''
+    hasName: Boolean((settings.fullName || '').trim())
   };
 }

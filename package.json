@@ -1,9 +1,10 @@
 {
   "name": "hh-cover-letter",
   "private": true,
+  "type": "module",
   "description": "Проверки разбора страниц hh.ru для расширения HH Cover Letter",
   "scripts": {
-    "test": "node test/extract.test.cjs"
+    "test": "node test/extract.test.cjs && node test/background.test.cjs"
   },
   "devDependencies": {
     "jsdom": "^29.1.1"

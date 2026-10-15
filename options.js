@@ -7,6 +7,7 @@ import {
   normalizeFullName,
   parseSourceUrl,
   resumeHash,
+  resumeKey,
   resolveProvider,
   saveSettings
 } from './lib.js';
@@ -179,7 +180,7 @@ function apply(next) {
   $('temperatureValue').textContent = String(next.temperature);
   $('maxTokens').value = String(next.maxTokens);
 
-  for (const id of ['tone', 'length', 'language', 'extra', 'resumeUrl', 'resume', 'fullName']) {
+  for (const id of ['tone', 'length', 'language', 'extra', 'resumeUrl', 'fullName']) {
     $(id).value = next[id] ?? '';
   }
 
@@ -187,11 +188,145 @@ function apply(next) {
   syncProviderUi();
   syncModelUi();
   refreshPermissionNote();
-  renderResumePicker(next.resumeOptions, next.selectedResumeUrl);
+  renderResumePicker(next.resumes, next.selectedResumeUrl);
   syncNameNote();
 }
 
 const personName = () => normalizeFullName($('fullName').value);
+
+// --- список резюме: у каждого свой текст ---------------------------------------
+
+function currentResumeUrl() {
+  return $('resumeChoice').value || settings.selectedResumeUrl || '';
+}
+
+function findEntry(url) {
+  const wanted = resumeKey(url);
+  if (!wanted) return null;
+  return (settings.resumes || []).find((item) => resumeKey(item.url) === wanted) || null;
+}
+
+// Правки в поле сохраняются в то резюме, которое сейчас показано.
+function stashResumeText() {
+  const url = currentResumeUrl();
+  if (!url) return;
+
+  const wanted = resumeKey(url);
+  settings = {
+    ...settings,
+    resumes: (settings.resumes || []).map((item) =>
+      resumeKey(item.url) === wanted ? { ...item, text: $('resume').value } : item
+    )
+  };
+}
+
+function resumeStateNote(entry) {
+  const note = $('resumeState');
+
+  if (!entry) {
+    note.textContent = '';
+    note.className = 'note';
+    return;
+  }
+
+  if (entry.text?.trim()) {
+    note.textContent = `Текст прочитан: ${entry.text.trim().length} знаков.`;
+    note.className = 'note ok';
+    return;
+  }
+
+  note.textContent = entry.error
+    ? `Не прочитано: ${entry.error}. Можно вставить текст вручную.`
+    : 'Текст не прочитан. Нажмите «Перечитать» или вставьте текст вручную.';
+  note.className = 'note warn';
+}
+
+function showResumeContent(url) {
+  const entry = findEntry(url);
+  $('resume').value = entry ? String(entry.text || '') : '';
+  $('resumeLabel').textContent = entry?.title ? `Текст резюме «${entry.title}»` : 'Текст резюме';
+  updateResumeLength();
+  resumeStateNote(entry);
+}
+
+function renderResumePicker(list, selectedUrl) {
+  const picker = $('resumePicker');
+  const select = $('resumeChoice');
+  const items = Array.isArray(list) ? list.filter((item) => item && item.url) : [];
+
+  if (!items.length) {
+    picker.hidden = true;
+    select.replaceChildren();
+    showResumeContent('');
+    return;
+  }
+
+  select.replaceChildren(
+    ...items.map((item) => {
+      const option = document.createElement('option');
+      option.value = item.url;
+      const title = item.title || `Резюме ${resumeHash(item.url).slice(0, 8)}`;
+      option.textContent = item.hasText ? title : `${title} — не прочитано`;
+      return option;
+    })
+  );
+
+  const wanted = items.some((item) => resumeKey(item.url) === resumeKey(selectedUrl))
+    ? selectedUrl
+    : items[0].url;
+
+  select.value = wanted;
+  picker.hidden = false;
+}
+
+// Читает все резюме из списка, показывая прогресс.
+function parseAllResumes({ force = false } = {}) {
+  return new Promise((resolve) => {
+    let port;
+    try {
+      port = chrome.runtime.connect({ name: 'resumes' });
+    } catch {
+      resolve({ ok: false, message: STALE_WORKER_HINT });
+      return;
+    }
+
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      try {
+        port.disconnect();
+      } catch {
+        // порт уже закрыт
+      }
+      resolve(result);
+    };
+
+    port.onMessage.addListener((msg) => {
+      if (msg.type === 'progress') {
+        const label = msg.title ? `«${msg.title}»` : 'резюме';
+        setStatus(
+          msg.current ? `Читаю ${label}: ${msg.done} из ${msg.total}…` : `Готово: ${msg.done} из ${msg.total}.`,
+          msg.error ? 'warn' : ''
+        );
+      } else if (msg.type === 'done') {
+        finish(msg);
+      } else if (msg.type === 'error') {
+        finish({ ok: false, message: msg.message });
+      }
+    });
+
+    port.onDisconnect.addListener(() => finish({ ok: false, message: STALE_WORKER_HINT }));
+
+    port.postMessage({ type: 'parse', force });
+  });
+}
+
+async function syncResumeStateAfterParse() {
+  settings = await loadSettings();
+  renderResumePicker(settings.resumes, settings.selectedResumeUrl);
+  showResumeContent(currentResumeUrl());
+}
 
 function syncNameNote() {
   const name = personName();
@@ -208,31 +343,6 @@ function syncNameNote() {
   note.className = 'note warn';
 }
 
-function renderResumePicker(options, selectedUrl) {
-  const picker = $('resumePicker');
-  const select = $('resumeChoice');
-  const list = Array.isArray(options) ? options.filter((item) => item && item.url) : [];
-
-  if (!list.length) {
-    picker.hidden = true;
-    select.replaceChildren();
-    return;
-  }
-
-  select.replaceChildren(
-    ...list.map((item) => {
-      const option = document.createElement('option');
-      option.value = item.url;
-      option.textContent = item.title ? `${item.title} (${resumeHash(item.url).slice(0, 8)}…)` : `Резюме ${resumeHash(item.url).slice(0, 8)}…`;
-      return option;
-    })
-  );
-
-  const wanted = list.some((item) => item.url === selectedUrl) ? selectedUrl : list[0].url;
-  select.value = wanted;
-  picker.hidden = false;
-}
-
 function collect() {
   return {
     provider: $('provider').value,
@@ -245,8 +355,7 @@ function collect() {
     language: $('language').value,
     extra: $('extra').value,
     resumeUrl: $('resumeUrl').value.trim(),
-    fullName: normalizeFullName($('fullName').value),
-    resume: $('resume').value
+    fullName: normalizeFullName($('fullName').value)
   };
 }
 
@@ -290,9 +399,14 @@ async function persist({ silent = false } = {}) {
 
   const apiKey = $('apiKey').value.trim();
 
+  // текст из поля относится к выбранному резюме и сохраняется вместе с ним
+  stashResumeText();
+
   const next = {
     ...settings,
     ...values,
+    resumes: settings.resumes,
+    selectedResumeUrl: currentResumeUrl() || settings.selectedResumeUrl,
     apiKeys: { ...settings.apiKeys, [providerId]: apiKey },
     modelsByProvider: { ...settings.modelsByProvider, [providerId]: values.model }
   };
@@ -376,10 +490,13 @@ $('grantAccess').addEventListener('click', async () => {
 
 $('save').addEventListener('click', () => persist());
 
-$('clearResume').addEventListener('click', () => {
+$('clearResume').addEventListener('click', async () => {
   $('resume').value = '';
   updateResumeLength();
-  setStatus('Поле резюме очищено — не забудьте сохранить.', 'warn');
+  stashResumeText();
+  await persist({ silent: true });
+  showResumeContent(currentResumeUrl());
+  setStatus('Текст выбранного резюме очищен — впишите нужный или нажмите «Перечитать».', 'warn');
 });
 
 $('test').addEventListener('click', async () => {
@@ -390,30 +507,6 @@ $('test').addEventListener('click', async () => {
   setStatus(result?.message || STALE_WORKER_HINT, result?.ok ? 'ok' : 'error');
   await checkBackground();
 });
-
-// Разбирает конкретное резюме и подставляет текст с именем в форму.
-async function loadSelectedResume(url) {
-  setStatus('Читаю резюме…');
-
-  const saved = await saveSettings({ selectedResumeUrl: url });
-  settings = saved;
-  $('resumeChoice').value = url;
-
-  const result = await callBackground({ type: 'refresh-resume', url });
-  if (!result?.ok) {
-    setStatus(result?.message || STALE_WORKER_HINT, 'error');
-    return false;
-  }
-
-  if (typeof result.resume === 'string') $('resume').value = result.resume;
-  if (result.name) $('fullName').value = result.name;
-
-  updateResumeLength();
-  syncNameNote();
-  await persist({ silent: true });
-  setStatus(`Резюме загружено: ${result.resume?.length ?? 0} знаков.`, 'ok');
-  return true;
-}
 
 $('loadResume').addEventListener('click', async () => {
   const parsed = parseSourceUrl($('resumeUrl').value);
@@ -438,37 +531,79 @@ $('loadResume').addEventListener('click', async () => {
     syncNameNote();
   }
 
-  if (result.kind === 'resume') {
-    if (typeof result.resume === 'string') $('resume').value = result.resume;
-    renderResumePicker(result.resumes, parsed.url);
-    updateResumeLength();
-    await persist({ silent: true });
-    setStatus(
-      `Резюме загружено: ${result.resume?.length ?? 0} знаков.${result.name ? ` Имя: ${result.name}.` : ''}`,
-      'ok'
-    );
-    return;
+  settings = await loadSettings();
+
+  // по умолчанию берём первое резюме, чтобы список не остался без выбора
+  if (!settings.selectedResumeUrl && settings.resumes.length) {
+    settings = await saveSettings({ selectedResumeUrl: settings.resumes[0].url });
   }
 
-  renderResumePicker(result.resumes, null);
-
-  if (result.resumes.length === 1) {
-    setStatus('Нашлось одно резюме — разбираю его…');
-    await loadSelectedResume(result.resumes[0].url);
-    return;
-  }
-
+  renderResumePicker(settings.resumes, settings.selectedResumeUrl);
+  showResumeContent(currentResumeUrl());
   await persist({ silent: true });
+
+  const nameInfo = result.name
+    ? ` Имя из профиля: ${result.name}.`
+    : ' Имя на странице не нашлось — впишите его в поле «Имя и фамилия для подписи».';
+  setStatus(`Найдено резюме: ${settings.resumes.length}.${nameInfo}`, result.name ? 'ok' : 'warn');
+
+  // читаем текст всех резюме сразу, чтобы при выборе он был на месте
+  const bulk = await parseAllResumes();
+  await syncResumeStateAfterParse();
+
+  if (!bulk.ok) {
+    setStatus(bulk.message || STALE_WORKER_HINT, 'error');
+    return;
+  }
+
+  const unread = (await loadSettings()).resumes.filter((item) => !String(item.text || '').trim()).length;
   setStatus(
-    `Найдено резюме: ${result.resumes.length}. Выберите нужное в списке «Какое резюме разобрать».` +
-      (result.name
-        ? ` Имя из профиля: ${result.name}.`
-        : ' Имя на странице не нашлось — впишите его в поле «Имя и фамилия для подписи».'),
-    result.name ? 'ok' : 'warn'
+    unread
+      ? `Резюме: ${bulk.parsed} из ${bulk.total} прочитано, ${unread} без текста — нажмите «Перечитать» или вставьте текст вручную.`
+      : `Готово: прочитано резюме ${bulk.parsed} из ${bulk.total}. Выберите, какое подставлять по умолчанию.`,
+    unread ? 'warn' : 'ok'
   );
 });
 
-$('resumeChoice').addEventListener('change', () => loadSelectedResume($('resumeChoice').value));
+$('resumeChoice').addEventListener('change', async () => {
+  await persist({ silent: true });
+  showResumeContent($('resumeChoice').value);
+  setStatus('Выбрано резюме по умолчанию. Для конкретной вакансии его можно сменить в панели на странице.', 'ok');
+});
+
+$('reloadResume').addEventListener('click', async () => {
+  const url = currentResumeUrl();
+  if (!url) return;
+
+  setStatus('Перечитываю резюме…');
+  stashResumeText();
+  await persist({ silent: true });
+
+  const result = await callBackground({ type: 'refresh-resume', url });
+  if (!result?.ok) {
+    setStatus(result?.message || STALE_WORKER_HINT, 'error');
+  } else {
+    setStatus(result.message, 'ok');
+  }
+
+  await syncResumeStateAfterParse();
+});
+
+$('reloadAllResumes').addEventListener('click', async () => {
+  setStatus('Перечитываю все резюме…');
+  stashResumeText();
+  await persist({ silent: true });
+
+  const bulk = await parseAllResumes({ force: true });
+  await syncResumeStateAfterParse();
+
+  setStatus(
+    bulk.ok
+      ? `Перечитано резюме: ${bulk.parsed} из ${bulk.total}${bulk.failed ? `, ошибок: ${bulk.failed}` : ''}.`
+      : bulk.message || STALE_WORKER_HINT,
+    bulk.ok ? 'ok' : 'error'
+  );
+});
 
 $('fullName').addEventListener('input', syncNameNote);
 

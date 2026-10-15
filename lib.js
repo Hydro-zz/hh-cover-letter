@@ -11,9 +11,9 @@ export const DEFAULT_SETTINGS = {
   language: 'ru',
   extra: '',
   resumeUrl: '',
-  resume: '',
+  resumes: [],
   selectedResumeUrl: '',
-  resumeOptions: [],
+  resumeByVacancy: {},
   fullName: ''
 };
 
@@ -188,6 +188,7 @@ export async function loadSettings() {
 
   merged.apiKeys = { ...(merged.apiKeys || {}) };
   merged.modelsByProvider = { ...(merged.modelsByProvider || {}) };
+  merged.resumeByVacancy = { ...(merged.resumeByVacancy || {}) };
 
   // ключ из версий до выбора провайдера принадлежал DeepSeek
   if (!Object.keys(merged.apiKeys).length && merged.apiKey) {
@@ -195,7 +196,52 @@ export async function loadSettings() {
   }
   delete merged.apiKey;
 
+  merged.resumes = migrateResumes(merged);
+  delete merged.resume;
+  delete merged.resumeOptions;
+
   return merged;
+}
+
+// До версии 1.2.0 хранился один текст резюме (resume) и список адресов (resumeOptions).
+// Переносим их в общий список, где у каждого резюме свой текст.
+function migrateResumes(settings) {
+  const list = Array.isArray(settings.resumes)
+    ? settings.resumes
+        .filter((item) => item && item.url)
+        .map((item) => ({
+          url: String(item.url),
+          title: String(item.title || ''),
+          text: String(item.text || ''),
+          error: String(item.error || '')
+        }))
+    : [];
+
+  if (list.length) return list;
+
+  const legacyText = String(settings.resume || '');
+  const legacyUrl = String(settings.selectedResumeUrl || '');
+  const options = Array.isArray(settings.resumeOptions) ? settings.resumeOptions : [];
+
+  if (options.length) {
+    return options
+      .filter((item) => item && item.url)
+      .map((item) => ({
+        url: String(item.url),
+        title: String(item.title || ''),
+        text: resumeKey(item.url) === resumeKey(legacyUrl) ? legacyText : '',
+        error: ''
+      }));
+  }
+
+  const sourceUrl = parseSourceUrl(settings.resumeUrl);
+  const sourceResumeUrl = sourceUrl.ok && sourceUrl.kind === 'resume' ? sourceUrl.url : '';
+
+  if (legacyText || legacyUrl || sourceResumeUrl) {
+    return [{ url: legacyUrl || sourceResumeUrl, title: '', text: legacyText, error: '' }];
+  }
+
+  return [];
 }
 
 export async function saveSettings(patch) {
@@ -238,6 +284,47 @@ export function normalizeFullName(value) {
 export function resumeHash(value) {
   const match = String(value || '').match(/\/resume\/([^/?#]+)/i);
   return match ? match[1] : '';
+}
+
+// --- работа со списком резюме: у каждого свой адрес, название и текст -----------
+
+export function resumeList(settings) {
+  return (settings?.resumes || [])
+    .filter((item) => item && item.url)
+    .map((item) => ({
+      url: String(item.url),
+      title: String(item.title || ''),
+      hasText: Boolean(String(item.text || '').trim()),
+      error: String(item.error || '')
+    }));
+}
+
+export function findResume(settings, url) {
+  const list = (settings?.resumes || []).filter((item) => item && item.url);
+  if (!list.length) return null;
+
+  const wanted = resumeKey(url);
+  if (!wanted) return null;
+
+  return list.find((item) => resumeKey(item.url) === wanted) || null;
+}
+
+export function resumeTextFor(settings, url) {
+  const item = findResume(settings, url);
+  return item ? String(item.text || '') : '';
+}
+
+// Какое резюме использовать: выбор для конкретной вакансии важнее общего из настроек.
+export function resumeUrlForVacancy(settings, vacancyUrl) {
+  const map = settings?.resumeByVacancy || {};
+  const chosen = map[String(vacancyUrl || '')] || settings?.selectedResumeUrl || '';
+  const item = findResume(settings, chosen) || (settings?.resumes || [])[0] || null;
+  return item ? String(item.url) : '';
+}
+
+export function resumeTitle(settings, url) {
+  const item = findResume(settings, url);
+  return item ? String(item.title || '') : '';
 }
 
 export function resumeKey(value) {

@@ -134,22 +134,29 @@
       <legend>Резюме и имя</legend>
 
       <label for="resumeUrl">
-        Ссылка на резюме или на профиль hh.ru
-        <span class="note">— https://hh.ru/resume/… либо страница вашего профиля</span>
+        Ссылка на профиль или на резюме hh.ru
+        <span class="note">— https://hh.ru/applicant/… либо https://hh.ru/resume/…</span>
       </label>
       <div class="row">
-        <input type="text" id="resumeUrl" placeholder="https://hh.ru/resume/0123456789abcdef" spellcheck="false" autocomplete="off" />
+        <input type="text" id="resumeUrl" placeholder="https://hh.ru/applicant/resumes" spellcheck="false" autocomplete="off" />
         <button type="button" id="loadResume">Загрузить</button>
       </div>
       <p class="note">
-        Ссылку на резюме берут так: hh.ru → «Мои резюме» → у нужного резюме «…» → «Скопировать ссылку». Можно указать
-        и ссылку на страницу профиля: тогда расширение возьмёт оттуда ваше имя и список резюме, а вы выберете нужное.
-        Страница открывается в фоне и закрывается автоматически.
+        Со страницы профиля расширение возьмёт ваше имя, названия и адреса всех резюме, а затем прочитает текст каждого
+        из них — свой для каждого резюме. Страницы открываются в фоне и закрываются автоматически. Можно указать и
+        прямую ссылку на одно резюме.
       </p>
 
       <div id="resumePicker" hidden>
-        <label for="resumeChoice">Какое резюме разобрать</label>
-        <select id="resumeChoice"></select>
+        <label for="resumeChoice">
+          Резюме для писем
+          <span class="note">— подставляется по умолчанию; для конкретной вакансии можно сменить в панели на странице</span>
+        </label>
+        <div class="row">
+          <select id="resumeChoice"></select>
+          <button type="button" id="reloadResume">Перечитать</button>
+        </div>
+        <p class="note" id="resumeState"></p>
       </div>
 
       <label for="fullName">
@@ -160,16 +167,14 @@
       <p class="note" id="nameNote"></p>
 
       <label for="resume">
-        Текст резюме <span class="note">— источник фактов для письма, <span id="resumeLength">0</span> знаков</span>
+        <span id="resumeLabel">Текст резюме</span>
+        <span class="note">— источник фактов для письма, <span id="resumeLength">0</span> знаков; правки сохраняются в это резюме</span>
       </label>
-      <textarea id="resume" rows="14" spellcheck="true" placeholder="Заполнится кнопкой «Загрузить», либо вставьте текст вручную."></textarea>
+      <textarea id="resume" rows="14" spellcheck="true" placeholder="Заполнится автоматически при загрузке профиля, либо вставьте текст вручную."></textarea>
       <div class="actions" style="margin-top: 10px">
-        <button type="button" id="clearResume">Очистить</button>
+        <button type="button" id="reloadAllResumes">Прочитать все резюме заново</button>
+        <button type="button" id="clearResume">Очистить текст</button>
       </div>
-      <p class="note">
-        Загруженный текст можно править — лишнее лучше убрать. Если текст пуст, при генерации письма расширение
-        подтянет резюме по ссылке само.
-      </p>
     </fieldset>
 
     <div class="actions">
