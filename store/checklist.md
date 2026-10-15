@@ -16,11 +16,10 @@
 
 ## 1. Реквизиты проекта
 
-- [ ] В [LICENSE](../LICENSE) заменить `nucle` на своё имя или логин.
-- [ ] В [PRIVACY.md](../PRIVACY.md) и [CHANGELOG.md](../CHANGELOG.md) заменить `nucle` в ссылках на реального владельца
-      репозитория.
-- [ ] Создать публичный репозиторий на GitHub и подключить его:
-      `git remote add origin https://github.com/<владелец>/hh-cover-letter.git`, затем `git push -u origin main`.
+- [x] В [LICENSE](../LICENSE) указан владелец: `Hydro-zz`.
+- [x] В [PRIVACY.md](../PRIVACY.md) и [CHANGELOG.md](../CHANGELOG.md) ссылки ведут на владельца `Hydro-zz`.
+- [ ] Создать публичный репозиторий `https://github.com/Hydro-zz/hh-cover-letter` и отправить код:
+      `git remote add origin https://github.com/Hydro-zz/hh-cover-letter.git`, затем `git push -u origin main`.
       После этого `package.ps1` сам подставит `homepage_url` в релизный манифест из адреса remote.
 
 ## 2. Публичный URL политики конфиденциальности
@@ -29,7 +28,7 @@
 
 - [ ] Включить GitHub Pages для репозитория (Settings → Pages → Deploy from branch → `main` / root) и получить адрес
       вида `https://<владелец>.github.io/hh-cover-letter/PRIVACY.html` при рендере Markdown, либо
-- [ ] использовать прямую ссылку на файл: `https://github.com/<владелец>/hh-cover-letter/blob/main/PRIVACY.md`.
+- [ ] использовать прямую ссылку на файл: `https://github.com/Hydro-zz/hh-cover-letter/blob/main/PRIVACY.md`.
 - [ ] Проверить, что ссылка открывается в приватном окне без авторизации.
 
 ## 3. Скриншоты

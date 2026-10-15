@@ -81,7 +81,7 @@
 ## Контакт
 
 Вопросы и обращения: раздел Issues репозитория проекта
-(<https://github.com/nucle/hh-cover-letter/issues>).
+(<https://github.com/Hydro-zz/hh-cover-letter/issues>).
 
 ---
 
@@ -166,4 +166,4 @@ The current version of this policy always lives in the project repository. Mater
 ## Contact
 
 Questions and requests: the project repository's Issues section
-(<https://github.com/nucle/hh-cover-letter/issues>).
+(<https://github.com/Hydro-zz/hh-cover-letter/issues>).

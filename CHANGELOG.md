@@ -74,9 +74,9 @@
 - Горячая клавиша `Alt+Shift+C`.
 - Промпт с жёсткими правилами: опираться только на факты из резюме, без штампов и плейсхолдеров.
 
-[Unreleased]: https://github.com/nucle/hh-cover-letter/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/nucle/hh-cover-letter/releases/tag/v1.0.0
-[0.4.0]: https://github.com/nucle/hh-cover-letter/releases/tag/v0.4.0
-[0.3.0]: https://github.com/nucle/hh-cover-letter/releases/tag/v0.3.0
-[0.2.0]: https://github.com/nucle/hh-cover-letter/releases/tag/v0.2.0
-[0.1.0]: https://github.com/nucle/hh-cover-letter/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Hydro-zz/hh-cover-letter/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v1.0.0
+[0.4.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v0.4.0
+[0.3.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v0.3.0
+[0.2.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v0.2.0
+[0.1.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v0.1.0
