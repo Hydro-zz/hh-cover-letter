@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Проверки разбора страниц hh.ru для расширения HH Cover Letter",
   "scripts": {
-    "test": "node test/extract.test.cjs && node test/background.test.cjs"
+    "test": "node test/extract.test.cjs && node test/background.test.cjs && node test/options.test.cjs && node test/panel.test.cjs"
   },
   "devDependencies": {
     "jsdom": "^29.1.1"

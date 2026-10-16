@@ -189,12 +189,18 @@ function apply(next) {
   syncModelUi();
   refreshPermissionNote();
   renderResumePicker(next.resumes, next.selectedResumeUrl);
+  showResumeContent(currentResumeUrl());
   syncNameNote();
 }
 
 const personName = () => normalizeFullName($('fullName').value);
 
 // --- список резюме: у каждого свой текст ---------------------------------------
+
+// Какое резюме показано в поле прямо сейчас. Обработчик change у выпадающего списка
+// срабатывает уже после смены значения, поэтому сохранять текст нужно по этому адресу,
+// а не по текущему значению списка, иначе правки уедут в чужое резюме.
+let shownResumeUrl = '';
 
 function currentResumeUrl() {
   return $('resumeChoice').value || settings.selectedResumeUrl || '';
@@ -208,10 +214,9 @@ function findEntry(url) {
 
 // Правки в поле сохраняются в то резюме, которое сейчас показано.
 function stashResumeText() {
-  const url = currentResumeUrl();
-  if (!url) return;
+  const wanted = resumeKey(shownResumeUrl);
+  if (!wanted) return;
 
-  const wanted = resumeKey(url);
   settings = {
     ...settings,
     resumes: (settings.resumes || []).map((item) =>
@@ -242,7 +247,8 @@ function resumeStateNote(entry) {
 }
 
 function showResumeContent(url) {
-  const entry = findEntry(url);
+  shownResumeUrl = url || '';
+  const entry = findEntry(shownResumeUrl);
   $('resume').value = entry ? String(entry.text || '') : '';
   $('resumeLabel').textContent = entry?.title ? `Текст резюме «${entry.title}»` : 'Текст резюме';
   updateResumeLength();
@@ -261,6 +267,9 @@ function renderResumePicker(list, selectedUrl) {
     return;
   }
 
+  const previous = select.value;
+  const has = (url) => items.some((item) => resumeKey(item.url) === resumeKey(url));
+
   select.replaceChildren(
     ...items.map((item) => {
       const option = document.createElement('option');
@@ -271,11 +280,9 @@ function renderResumePicker(list, selectedUrl) {
     })
   );
 
-  const wanted = items.some((item) => resumeKey(item.url) === resumeKey(selectedUrl))
-    ? selectedUrl
-    : items[0].url;
-
-  select.value = wanted;
+  // выбор пользователя важнее значения из настроек: иначе после «Перечитать» список
+  // вернулся бы к резюме по умолчанию и поле показало бы чужой текст
+  select.value = has(previous) ? previous : has(selectedUrl) ? selectedUrl : items[0].url;
   picker.hidden = false;
 }
 
