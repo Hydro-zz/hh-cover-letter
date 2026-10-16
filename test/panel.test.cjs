@@ -26,7 +26,7 @@ const VACANCY_HTML = `
   <a data-qa="vacancy-response-link-top" href="#">Откликнуться</a>
 `;
 
-async function boot(statusPatch = {}) {
+async function boot(statusPatch = {}, { orphaned = false } = {}) {
   const dom = new JSDOM(`<!DOCTYPE html><html><body>${VACANCY_HTML}</body></html>`, {
     url: VACANCY_URL,
     runScripts: 'outside-only'
@@ -43,6 +43,7 @@ async function boot(statusPatch = {}) {
 
   const status = {
     ok: true,
+    version: '1.2.2',
     provider: 'DeepSeek',
     model: 'deepseek-chat',
     hasKey: true,
@@ -66,6 +67,7 @@ async function boot(statusPatch = {}) {
 
   window.chrome = {
     runtime: {
+      id: orphaned ? undefined : 'test-extension',
       sendMessage: async (msg) => {
         sent.push(msg);
         if (msg.type === 'status') return status;
@@ -93,10 +95,13 @@ async function boot(statusPatch = {}) {
   await sleep(150);
 
   const shadow = window.document.getElementById('hh-cover-letter-root')?.shadowRoot;
+  const hintLines = () =>
+    [...(shadow?.querySelectorAll('.vacancy div') || [])].map((element) => element.textContent).join(' | ');
 
   return {
     window,
     shadow,
+    hintLines,
     sent,
     portMessages,
     row: shadow?.querySelector('.resumeRow'),
@@ -148,6 +153,18 @@ async function boot(statusPatch = {}) {
   // --- 5. без резюме список не показывается --------------------------------------
   const empty = await boot({ resumes: [], hasResume: false, hasResumeText: false, selectedResumeUrl: '' });
   check('без резюме список скрыт', empty.row?.hidden === true, `hidden=${empty.row?.hidden}`);
+
+  // --- 6. в панели видна версия расширения ---------------------------------------
+  check('в панели видна версия расширения', /расширение 1\.2\.\d/.test(panel.hintLines()), panel.hintLines());
+
+  // --- 7. старый content script после перезагрузки расширения ---------------------
+  const stale = await boot({}, { orphaned: true });
+  check(
+    'устаревший скрипт: просит обновить страницу',
+    /обновите страницу/i.test(stale.hintLines()),
+    stale.hintLines()
+  );
+  check('устаревший скрипт: список резюме не показывается', stale.row?.hidden === true, `hidden=${stale.row?.hidden}`);
 
   const failed = results.filter((item) => !item.pass);
   console.log(`\n${results.length - failed.length}/${results.length} проверок пройдено`);

@@ -732,6 +732,7 @@ async function statusReport() {
 
   return {
     ok: true,
+    version: chrome.runtime.getManifest().version,
     provider: provider.label,
     providerId: provider.id,
     host: hostOf(provider.baseUrl),

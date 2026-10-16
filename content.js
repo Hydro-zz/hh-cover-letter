@@ -290,12 +290,19 @@
     ui.insert.disabled = next || !ui.letter.value.trim();
   }
 
+  // После перезагрузки расширения Chrome не перезапускает content script на открытых вкладках:
+  // старый экземпляр теряет доступ к chrome.* и оживить его нельзя — помогает только перезагрузка страницы.
+  const isOrphaned = () => !chrome.runtime?.id;
+
   async function fetchStatus() {
+    if (isOrphaned()) return { orphaned: true };
+
     try {
       const status = await chrome.runtime.sendMessage({ type: 'status' });
-      return status?.ok ? status : null;
+      if (status?.ok) return status;
+      return isOrphaned() ? { orphaned: true } : null;
     } catch {
-      return null;
+      return isOrphaned() ? { orphaned: true } : null;
     }
   }
 
@@ -372,12 +379,14 @@
 
     const warnings = [];
     if (vacancy.description.length < MIN_DESCRIPTION) warnings.push('текст вакансии не прочитан');
-    if (status && !status.hasKey) warnings.push(`нет API-ключа ${status.provider}`);
+    if (status && !status.orphaned && !status.hasKey) warnings.push(`нет API-ключа ${status.provider}`);
     for (const warning of warnings) lines.push({ text: `⚠ ${warning}`, warn: true });
 
-    syncResumeSelect(status);
+    syncResumeSelect(status?.orphaned ? null : status);
 
-    if (!status) {
+    if (status?.orphaned) {
+      lines.push({ text: '⚠ версия расширения обновилась — обновите страницу (F5)', warn: true });
+    } else if (!status) {
       lines.push({ text: '⚠ фоновая часть расширения не отвечает', warn: true });
     } else if (!status.resumes?.length) {
       lines.push({ text: '⚠ нет резюме: загрузите профиль в настройках', warn: true });
@@ -388,14 +397,18 @@
       }
     }
 
-    if (status && status.hasName) {
+    if (status && !status.orphaned && status.hasName) {
       lines.push({ text: `подпись: ${status.fullName}` });
-    } else if (status) {
+    } else if (status && !status.orphaned) {
       lines.push({ text: '⚠ имя для подписи не задано', warn: true });
     }
 
     if (status?.model) {
       lines.push({ text: `${status.provider}: ${status.model}` });
+    }
+
+    if (status?.version) {
+      lines.push({ text: `расширение ${status.version}` });
     }
 
     ui.vacancy.replaceChildren(
@@ -424,6 +437,10 @@
 
     const status = await fetchStatus();
 
+    if (status?.orphaned) {
+      setStatus('Версия расширения обновилась — обновите страницу (F5) и попробуйте снова.', 'error');
+      return;
+    }
     if (!status) {
       setStatus('Фоновая часть расширения не отвечает. Перезагрузите расширение в chrome://extensions.', 'error');
       return;

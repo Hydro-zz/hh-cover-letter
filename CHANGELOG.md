@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-10-16
+
+### Добавлено
+- В панели на странице вакансии видна версия расширения — по ней сразу понятно, какая сборка работает в этой вкладке.
+- Если после перезагрузки расширения на вкладке остался старый content script, панель прямо просит обновить страницу
+  (F5): раньше в этом состоянии она писала «фоновая часть расширения не отвечает», что сбивало с толку.
+
+### Исправлено
+- В том же состоянии в панели появлялось «нет API-ключа undefined».
+
 ## [1.2.1] — 2026-10-16
 
 ### Исправлено
@@ -132,7 +142,8 @@
 - Горячая клавиша `Alt+Shift+C`.
 - Промпт с жёсткими правилами: опираться только на факты из резюме, без штампов и плейсхолдеров.
 
-[Unreleased]: https://github.com/Hydro-zz/hh-cover-letter/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/Hydro-zz/hh-cover-letter/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v1.2.2
 [1.2.1]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v1.2.1
 [1.2.0]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v1.2.0
 [1.1.1]: https://github.com/Hydro-zz/hh-cover-letter/releases/tag/v1.1.1
